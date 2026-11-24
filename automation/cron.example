@@ -1,0 +1,21 @@
+# ETL diario de riesgo de crédito — ejemplo de crontab.
+#
+# Qué hace: corre el ETL de lunes a viernes a las 06:00, con las
+# salidas en outputs/ y el log de cada corrida en logs/. El propio
+# run_etl.sh ya guarda un log por corrida; lo que se redirige aquí es
+# solo lo que cron capturaría si algo fallara antes de arrancar el
+# script.
+#
+# Cómo instalarlo (en una máquina con cron):
+#   crontab -e
+#   ...pega la línea de abajo, guarda y sal...
+#
+# NOTA HONESTA: en la máquina virtual donde se escribió este proyecto
+# no hay demonio cron instalado (no existe el comando `crontab`), así
+# que esta línea NO se probó instalándola aquí. La sintaxis es la
+# estándar de 5 campos y el comando es el mismo que se corre a mano.
+# En un servidor o en WSL con cron instalado, funciona tal cual.
+# La alternativa probada aquí es el timer de systemd de al lado.
+
+# min hora día-mes mes día-semana   comando
+0 6 * * 1-5 /home/hatch/workspace/quant-projects/spark-credit-risk-etl/run_etl.sh >> /home/hatch/workspace/quant-projects/spark-credit-risk-etl/logs/cron.log 2>&1

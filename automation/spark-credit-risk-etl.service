@@ -1,0 +1,21 @@
+# spark-credit-risk-etl.service — el trabajo en sí (se ejecuta una vez y termina).
+#
+# Instalación (en una máquina con systemd):
+#   sudo cp automation/spark-credit-risk-etl.service /etc/systemd/system/
+#   sudo cp automation/spark-credit-risk-etl.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now spark-credit-risk-etl.timer
+#   systemctl list-timers spark-credit-risk-etl.timer   # ver próxima ejecución
+#
+# Si el servicio corre como otro usuario, agrega la línea User= con su
+# nombre (aquí se omite a propósito: en la VM de desarrollo no existe
+# un usuario de servicio y el que lo instale debe poner el suyo).
+
+[Unit]
+Description=ETL de riesgo de crédito con PySpark (spark-credit-risk-etl)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/hatch/workspace/quant-projects/spark-credit-risk-etl
+ExecStart=/home/hatch/workspace/quant-projects/spark-credit-risk-etl/run_etl.sh

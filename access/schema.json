@@ -1,0 +1,131 @@
+{
+  "tables": [
+    {
+      "name": "cartera",
+      "rows": 24,
+      "columns": [
+        {
+          "name": "id_credito",
+          "type": "TEXT",
+          "length": 50
+        },
+        {
+          "name": "segmento",
+          "type": "TEXT",
+          "length": 50
+        },
+        {
+          "name": "ead",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "pd",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "lgd",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "estatus",
+          "type": "TEXT",
+          "length": 50
+        },
+        {
+          "name": "perdida_esperada",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "pd_bucket",
+          "type": "TEXT",
+          "length": 50
+        }
+      ],
+      "csv": "/home/hatch/workspace/quant-projects/spark-credit-risk-etl/access/csv/cartera.csv"
+    },
+    {
+      "name": "por_segmento",
+      "rows": 4,
+      "columns": [
+        {
+          "name": "segmento",
+          "type": "TEXT",
+          "length": 50
+        },
+        {
+          "name": "numero_creditos",
+          "type": "LONG"
+        },
+        {
+          "name": "ead_total",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "perdida_esperada_total",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "pd_ponderada",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "cartera_vencida",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "morosidad_pct",
+          "type": "DOUBLE"
+        }
+      ],
+      "csv": "/home/hatch/workspace/quant-projects/spark-credit-risk-etl/access/csv/por_segmento.csv"
+    },
+    {
+      "name": "por_estatus",
+      "rows": 2,
+      "columns": [
+        {
+          "name": "estatus",
+          "type": "TEXT",
+          "length": 50
+        },
+        {
+          "name": "numero_creditos",
+          "type": "LONG"
+        },
+        {
+          "name": "ead_total",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "perdida_esperada_total",
+          "type": "DOUBLE"
+        }
+      ],
+      "csv": "/home/hatch/workspace/quant-projects/spark-credit-risk-etl/access/csv/por_estatus.csv"
+    },
+    {
+      "name": "buckets_pd",
+      "rows": 4,
+      "columns": [
+        {
+          "name": "pd_bucket",
+          "type": "TEXT",
+          "length": 50
+        },
+        {
+          "name": "numero_creditos",
+          "type": "LONG"
+        },
+        {
+          "name": "ead_total",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "perdida_esperada_total",
+          "type": "DOUBLE"
+        }
+      ],
+      "csv": "/home/hatch/workspace/quant-projects/spark-credit-risk-etl/access/csv/buckets_pd.csv"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+# Salidas del ETL y artefactos de ejecución (no van a Git).
+outputs/
+logs/
+spark-tmp/
+.pip-tmp/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.parquet
+# Artefactos del build de Access que se regeneran solos (los jars de
+# Jackcess y las clases compiladas). El .accdb y los CSV + esquema
+# SÍ van a Git: son el producto.
+access/lib/
+access/build/

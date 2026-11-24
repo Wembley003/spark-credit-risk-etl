@@ -1,0 +1,21 @@
+# spark-credit-risk-etl.timer — el despertador del ETL.
+#
+# Corre el servicio de lunes a viernes a las 06:00. Persistent=true
+# significa que si la máquina estaba apagada a las 06:00, el ETL corre
+# en cuanto vuelve a encenderse, en vez de saltarse ese día. Es el
+# comportamiento que uno quiere para un reporte matutino de riesgo.
+#
+# Verificación de sintaxis (probada en la VM de desarrollo):
+#   systemd-analyze verify automation/spark-credit-risk-etl.service \
+#       automation/spark-credit-risk-etl.timer
+
+[Unit]
+Description=ETL diario de riesgo de crédito, 06:00 de lunes a viernes
+
+[Timer]
+OnCalendar=Mon-Fri 06:00
+Persistent=true
+Unit=spark-credit-risk-etl.service
+
+[Install]
+WantedBy=timers.target
