@@ -157,11 +157,11 @@ def test_cli_sin_outputs_falla_con_mensaje_claro(tmp_path, capsys):
 
 
 def test_cli_con_parquet_real(tmp_path):
-    # Las salidas reales del ETL ya existen en outputs/parquet.
+    # Las salidas reales del ETL ya existen en outputs/ (Plata y Oro).
     project = Path(__file__).resolve().parent.parent
     out = tmp_path / "portfolio.xlsx"
     rc = main([
-        "--input-dir", str(project / "outputs" / "parquet"),
+        "--input-dir", str(project / "outputs"),
         "--output", str(out),
     ])
     assert rc == 0

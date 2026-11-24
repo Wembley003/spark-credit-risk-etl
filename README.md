@@ -37,24 +37,71 @@ contrastar.
 | lgd         | pérdida dado el impago, como fracción (0 a 1)              |
 | estatus     | vigente o vencido                                          |
 
-## Arquitectura
+## Arquitectura por capas (Bronce → Plata → Oro)
+
+El pipeline está organizado en tres capas, como un yacimiento
+estratificado: cada capa es un estado de los datos y solo se llega a
+la siguiente pasando por la anterior. La regla es simple — una capa
+no lee nunca de una capa superior, solo de la inmediata inferior.
 
 ```
 data/portfolio_sample.csv
-        │  lectura con esquema fijo (etl.read_portfolio)
+        │  to_bronze: lectura con esquema fijo, sin tocar nada
         ▼
-  validación (etl.validate_portfolio) ── si falla, se aborta (código 3)
-        │  sin nulos, PD/LGD en [0,1], EAD > 0, estatus conocidos, sin duplicados
-        ▼
-  enriquecimiento: perdida_esperada = EAD x PD x LGD, buckets de PD
-        │
-        ├─► outputs/parquet/cartera_limpia      (la cartera enriquecida)
-        ├─► outputs/parquet/resumen_cartera     (una fila: toda la cartera)
-        ├─► outputs/parquet/resumen_segmento    (por segmento)
-        ├─► outputs/parquet/resumen_estatus     (vigente / vencido)
-        ├─► outputs/parquet/resumen_buckets_pd  (por bucket de PD)
-        └─► outputs/csv/*.csv                  (lo mismo, para abrir en Excel)
+┌─ BRONCE ─────────────────────────────────────────────┐
+│ outputs/bronze/cartera_cruda     (Parquet + CSV)     │
+│ Los datos tal como llegan. Si una fila viene rota,   │
+│ aquí se guarda igual: el Bronce preserva, no juzga.  │
+└───────────────────────────┬────────────────────────────┘
+                            │  to_silver: validación (la compuerta)
+                            │  si falla, se aborta (código 3) y no se
+                            │  escribe nada en Plata ni en Oro
+                            ▼
+┌─ PLATA ──────────────────────────────────────────────┐
+│ outputs/silver/cartera_limpia    (Parquet + CSV)     │
+│ Limpios y validados: sin nulos, PD/LGD en [0,1],     │
+│ EAD > 0, estatus conocidos, sin duplicados. Además    │
+│ enriquecidos: perdida_esperada = EAD x PD x LGD y    │
+│ buckets de PD.                                        │
+└───────────────────────────┬────────────────────────────┘
+                            │  to_gold: agregaciones
+                            ▼
+┌─ ORO ────────────────────────────────────────────────┐
+│ outputs/gold/resumen_cartera     (una fila: todo)    │
+│ outputs/gold/resumen_segmento    (por segmento)      │
+│ outputs/gold/resumen_estatus     (vigente / vencido) │
+│ outputs/gold/resumen_buckets_pd  (por bucket de PD)  │
+│ Listos para el negocio: es lo que leen el tablero,   │
+│ el Excel (outputs/portfolio.xlsx) y Access.          │
+└──────────────────────────────────────────────────────┘
 ```
+
+La implementación gemela en pandas (`reference_impl.py`) refleja
+las mismas tres capas — `to_bronze`, `to_silver`, `to_gold` — con
+las mismas reglas y los mismos archivos de salida, así que los
+números de Spark y de pandas se pueden comparar capa por capa.
+
+## Las tres capas del proyecto
+
+Bronce → Plata → Oro es el flujo de los datos; estas tres capas son
+la arquitectura del proyecto (y son las que mandan sobre quién puede
+llamar a quién):
+
+- **Capa del cliente (presentación)** — `cli.py`, `run_etl.py`,
+  `run_etl.sh`, `Makefile`: lo que el usuario corre. No toca el
+  almacenamiento directo ni los formatos de salida.
+- **Capa de reglas de negocio** — `etl.py`, `reference_impl.py`:
+  la validación, el enriquecimiento (pérdida esperada = EAD x PD x
+  LGD, buckets de PD) y los agregados Oro. No depende del formato de
+  salida: las reglas corren igual sin Excel ni SQLite (hay una prueba
+  que lo comprueba con esas librerías bloqueadas).
+- **Capa de consultas o análisis** — las agregaciones Oro expresadas
+  como consultas Spark SQL / DataFrame, más `excel_export.py`,
+  `pivot_table.py` y `access/`: lo de Oro, preguntado y exportado.
+
+Las pruebas de `tests/test_layers.py` verifican que las capas no se
+mezclen (análisis estático de imports) además del contrato
+Bronce → Plata → Oro.
 
 La pérdida esperada es el valor esperado de la pérdida, en el sentido
 literal de la probabilidad: si el crédito impaga (probabilidad PD), se
@@ -148,8 +195,9 @@ máquina normal ese puente funciona; aquí simplemente no hace falta.
 ## Pruebas
 
 ```bash
-make test             # 23 pruebas: 9 de Spark + 6 de la referencia
+make test             # 34 pruebas: 9 de Spark + 6 de la referencia
                       # + 5 de la exportación a Excel + 3 de Access
+                      # + 8 de Bronce/Plata/Oro + 3 de las tres capas
 make test-reference   # solo pandas, sin Java ni Spark
 ```
 
@@ -158,10 +206,15 @@ validación atrape PD fuera de rango e ids duplicados, que las cifras
 sean exactas (EAD $17,955,000, pérdida esperada $358,595, morosidad
 31.30%), que los segmentos sumen al total y que Spark y pandas den
 lo mismo. También que `run_etl` aborte con datos rotos en vez de
-inventar números.
+inventar números, y que cada capa cumpla su contrato: el Bronce
+preserva lo crudo sin juzgarlo, la Plata no deja pasar filas
+inválidas y el Oro reproduce las cifras conocidas.
 
 ## Qué demuestra este proyecto
 
+- **Arquitectura por capas (Bronce → Plata → Oro)**: lo crudo se
+  preserva, lo limpio se valida y lo agregado está listo para el
+  negocio; cada capa solo lee de la inmediata inferior.
 - **PySpark (SQL/DataFrame API)**: lectura con esquema explícito,
   validación, agregaciones y escritura en Parquet/CSV.
 - **SQL**: las métricas son agregaciones (sumas ponderadas, `groupBy`)

@@ -1,4 +1,6 @@
-"""Exportación a Excel con tablas dinámicas NATIVAS.
+"""
+Capa: Consultas o análisis — lo que sale de Oro, preguntado y exportado a Excel.
+Exportación a Excel con tablas dinámicas NATIVAS.
 
 ¿Por qué no basta con dejar los CSV? Porque el analista que abre la
 cartera en Excel no quiere solo los números: quiere *preguntarle*
@@ -30,8 +32,11 @@ Las tres preguntas que se guardan en el libro, todas sobre la hoja
 Uso:
 
     python -m spark_credit_risk_etl.excel_export
-    python -m spark_credit_risk_etl.excel_export --input-dir outputs/parquet --output outputs/portfolio.xlsx
+    python -m spark_credit_risk_etl.excel_export --input-dir outputs --output outputs/portfolio.xlsx
 
+La cartera limpia se lee de la capa Plata (``outputs/silver``) y los
+resúmenes de la capa Oro (``outputs/gold``): el libro se construye
+sobre las salidas ya validadas y agregadas del ETL, no sobre lo crudo.
 Si no hay salidas del ETL todavía, el programa lo dice claro y sale
 con código 2: primero hay que correr el ETL (``./run_etl.sh`` o
 ``make run``).
@@ -51,7 +56,9 @@ from .pivot_table import add_pivot_table
 __all__ = ["build_workbook", "main"]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PARQUET_DIR = PROJECT_ROOT / "outputs" / "parquet"
+# La raíz de salidas del ETL: la cartera limpia vive en Plata y los
+# resúmenes en Oro (ver etl.py: to_bronze / to_silver / to_gold).
+DEFAULT_OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_XLSX = PROJECT_ROOT / "outputs" / "portfolio.xlsx"
 
 # Las hojas del libro y las columnas que lleva cada una, en orden.
@@ -228,15 +235,16 @@ def _read_parquet(parquet_dir, name):
 
 
 def main(argv=None):
-    """CLI: de outputs/parquet/*.parquet a outputs/portfolio.xlsx."""
+    """CLI: de outputs/silver y outputs/gold a outputs/portfolio.xlsx."""
     parser = argparse.ArgumentParser(
         description="Exporta las salidas del ETL a Excel con tablas "
                     "dinámicas nativas."
     )
     parser.add_argument(
-        "--input-dir", default=str(DEFAULT_PARQUET_DIR),
-        help="directorio con los Parquet del ETL (por defecto: "
-             "outputs/parquet)",
+        "--input-dir", default=str(DEFAULT_OUTPUTS_DIR),
+        help="directorio raíz de salidas del ETL (por defecto: "
+             "outputs; la cartera limpia se lee de silver/parquet y "
+             "los resúmenes de gold/parquet)",
     )
     parser.add_argument(
         "--output", default=str(DEFAULT_XLSX),
@@ -244,21 +252,29 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    parquet_dir = Path(args.input_dir)
-    if not parquet_dir.is_dir():
+    outputs_dir = Path(args.input_dir)
+    if not outputs_dir.is_dir():
         print(
             "error: no existe el directorio de salidas del ETL "
-            f"({parquet_dir}). Primero corre el ETL para generarlas: "
+            f"({outputs_dir}). Primero corre el ETL para generarlas: "
             "./run_etl.sh  o  make run  (o ./run_etl.sh --reference, "
             "sin Java).",
             file=sys.stderr,
         )
         return 2
     try:
-        portfolio_df = _read_parquet(parquet_dir, "cartera_limpia")
-        segmento_df = _read_parquet(parquet_dir, "resumen_segmento")
-        estatus_df = _read_parquet(parquet_dir, "resumen_estatus")
-        buckets_df = _read_parquet(parquet_dir, "resumen_buckets_pd")
+        portfolio_df = _read_parquet(
+            outputs_dir / "silver" / "parquet", "cartera_limpia"
+        )
+        segmento_df = _read_parquet(
+            outputs_dir / "gold" / "parquet", "resumen_segmento"
+        )
+        estatus_df = _read_parquet(
+            outputs_dir / "gold" / "parquet", "resumen_estatus"
+        )
+        buckets_df = _read_parquet(
+            outputs_dir / "gold" / "parquet", "resumen_buckets_pd"
+        )
     except FileNotFoundError as exc:
         print(
             f"error: {exc}. Vuelve a correr el ETL para regenerar las "

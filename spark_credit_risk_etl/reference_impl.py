@@ -1,4 +1,6 @@
-"""Implementación de referencia en Python puro (pandas) del mismo ETL.
+"""
+Capa: Reglas de negocio — el gemelo en pandas de las mismas reglas del ETL, con las mismas capas Bronce → Plata → Oro.
+Implementación de referencia en Python puro (pandas) del mismo ETL.
 
 Dos motivos para que exista. El primero es práctico: en una máquina sin
 Java no hay Spark, y esta versión corre en cualquier lado con solo
@@ -6,9 +8,17 @@ pandas. El segundo es de verificación: si dos implementaciones
 independientes — Spark y pandas — dan los mismos números sobre los
 mismos datos, es mucho más difícil que un bug se cuele callado en
 ambas. Los tests comparan las dos, cifra por cifra.
+
+Refleja las mismas tres capas del ETL de Spark (Bronce → Plata →
+Oro), con las mismas reglas y los mismos archivos de salida: el
+Bronce preserva lo crudo, la Plata valida y enriquece, y el Oro
+agrega. Si una capa da distinto en pandas que en Spark, el bug está
+en una de las dos y los tests lo cazan.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pandas as pd
 
@@ -22,6 +32,9 @@ __all__ = [
     "segment_summary",
     "status_summary",
     "pd_bucket_summary",
+    "to_bronze",
+    "to_silver",
+    "to_gold",
 ]
 
 ESTATUS_VALIDOS = ("vigente", "vencido")
@@ -157,3 +170,64 @@ def pd_bucket_summary(df):
             }
         )
     return pd.DataFrame(rows)
+
+
+def _write_layer(df, layer_dir, name):
+    """Escribe un DataFrame de una capa: Parquet + CSV, un solo archivo cada uno."""
+    layer_dir = Path(layer_dir)
+    (layer_dir / "parquet").mkdir(parents=True, exist_ok=True)
+    (layer_dir / "csv").mkdir(parents=True, exist_ok=True)
+    pq = layer_dir / "parquet" / f"{name}.parquet"
+    csv = layer_dir / "csv" / f"{name}.csv"
+    df.to_parquet(pq, index=False)
+    df.to_csv(csv, index=False)
+    return {"parquet": str(pq), "csv": str(csv)}
+
+
+def to_bronze(path, out_dir):
+    """Capa Bronce: la cartera tal como llega, sin tocar.
+
+    Se lee el CSV y se guarda una copia exacta en ``outputs/bronze``.
+    No se valida ni se enriquece nada: el Bronce preserva lo crudo,
+    incluida una fila rota, para poder diagnosticarla después.
+    Devuelve (DataFrame crudo, rutas escritas).
+    """
+    df = load_portfolio(path)
+    written = _write_layer(df, Path(out_dir) / "bronze", "cartera_cruda")
+    return df, written
+
+
+def to_silver(df, out_dir):
+    """Capa Plata: validación (la compuerta) y enriquecimiento.
+
+    Si la cartera no pasa la validación se levanta ValueError y no se
+    escribe nada en Plata ni en Oro. Si pasa, se agregan la pérdida
+    esperada y el bucket de PD y se guarda en ``outputs/silver``.
+    Devuelve (DataFrame limpio y enriquecido, rutas escritas).
+    """
+    issues = validate(df)
+    if issues:
+        raise ValueError("cartera inválida: " + "; ".join(issues))
+    df = add_expected_loss(df)
+    df = add_pd_bucket(df)
+    written = _write_layer(df, Path(out_dir) / "silver", "cartera_limpia")
+    return df, written
+
+
+def to_gold(df, out_dir):
+    """Capa Oro: los agregados listos para el negocio.
+
+    El resumen de toda la cartera y sus aperturas por segmento, por
+    estatus y por bucket de PD, en ``outputs/gold``. Devuelve
+    (resúmenes como DataFrames, rutas escritas).
+    """
+    summaries = {
+        "resumen_cartera": pd.DataFrame([portfolio_summary(df)]),
+        "resumen_segmento": segment_summary(df),
+        "resumen_estatus": status_summary(df),
+        "resumen_buckets_pd": pd_bucket_summary(df),
+    }
+    written = {}
+    for name, summary_df in summaries.items():
+        written[name] = _write_layer(summary_df, Path(out_dir) / "gold", name)
+    return summaries, written

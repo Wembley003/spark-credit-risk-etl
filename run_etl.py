@@ -1,4 +1,6 @@
-"""Punto de entrada para spark-submit.
+"""
+Capa: Cliente (presentación) — punto de entrada para spark-submit.
+Punto de entrada para spark-submit.
 
 Uso:
 

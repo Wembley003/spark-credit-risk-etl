@@ -1,4 +1,6 @@
-"""Tablas dinámicas NATIVAS de Excel con openpyxl.
+"""
+Capa: Consultas o análisis — la maquinaria de tablas dinámicas para la exportación a Excel.
+Tablas dinámicas NATIVAS de Excel con openpyxl.
 
 El problema: openpyxl sabe escribir hojas, pero una tabla dinámica
 no es una hoja más: es un objeto con su propia definición XML, su

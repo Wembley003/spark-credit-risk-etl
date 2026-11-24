@@ -132,14 +132,22 @@ def test_run_etl_escribe_parquet_y_csv(spark, tmp_path):
     out = tmp_path / "outputs"
     result = etl.run_etl(DATA, out, spark=spark)
     assert result["summary"]["ead_total"] == pytest.approx(17_955_000.0)
-    cartera = spark.read.parquet(str(out / "parquet" / "cartera_limpia"))
+    # Bronce: lo crudo tal como llegó (24 filas, sin columnas calculadas).
+    cruda = spark.read.parquet(str(out / "bronze" / "parquet" / "cartera_cruda"))
+    assert cruda.count() == 24
+    assert cruda.columns == [
+        "id_credito", "segmento", "ead", "pd", "lgd", "estatus",
+    ]
+    # Plata: la cartera limpia y enriquecida.
+    cartera = spark.read.parquet(str(out / "silver" / "parquet" / "cartera_limpia"))
     assert cartera.count() == 24
     assert "perdida_esperada" in cartera.columns
     assert "pd_bucket" in cartera.columns
-    resumen = spark.read.parquet(str(out / "parquet" / "resumen_cartera"))
+    # Oro: los resúmenes, en Parquet y en CSV.
+    resumen = spark.read.parquet(str(out / "gold" / "parquet" / "resumen_cartera"))
     assert resumen.count() == 1
     # Los CSV quedan como un solo archivo part-*.csv dentro de su carpeta.
-    csv_files = list((out / "csv" / "resumen_segmento").glob("*.csv"))
+    csv_files = list((out / "gold" / "csv" / "resumen_segmento").glob("*.csv"))
     assert len(csv_files) == 1
     with open(csv_files[0], encoding="utf-8") as f:
         filas = list(csv.DictReader(f))

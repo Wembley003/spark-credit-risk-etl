@@ -1,4 +1,6 @@
-"""Línea de comandos del ETL.
+"""
+Capa: Cliente (presentación) — la línea de comandos que el usuario corre.
+Línea de comandos del ETL.
 
 Dos formas de correrlo, según lo que tenga la máquina:
 
@@ -20,8 +22,6 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-
-import pandas as pd
 
 from . import etl, reference_impl
 
@@ -68,33 +68,24 @@ def _print_summary(summary):
 
 
 def _run_reference(input_path, output_dir):
-    """La versión de pandas: mismo cálculo, sin JVM de por medio."""
-    df = reference_impl.load_portfolio(input_path)
-    issues = reference_impl.validate(df)
-    if issues:
-        print("Cartera inválida:", file=sys.stderr)
-        for issue in issues:
-            print(f"  - {issue}", file=sys.stderr)
+    """La versión de pandas: mismo cálculo, sin JVM de por medio.
+
+    Pasa por las mismas tres capas que la versión de Spark — Bronce
+    (lo crudo), Plata (validado y enriquecido) y Oro (agregados) — así
+    que las salidas quedan en los mismos lugares y con las mismas
+    cifras. Si la cartera no pasa la validación, la Plata se niega y
+    el programa sale con código 3, igual que con Spark.
+    """
+    try:
+        df_raw = reference_impl.to_bronze(input_path, output_dir)[0]
+        df = reference_impl.to_silver(df_raw, output_dir)[0]
+        reference_impl.to_gold(df, output_dir)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return EXIT_INVALID_DATA
-    df = reference_impl.add_expected_loss(df)
-    df = reference_impl.add_pd_bucket(df)
     summary = reference_impl.portfolio_summary(df)
-    out = Path(output_dir)
-    (out / "csv").mkdir(parents=True, exist_ok=True)
-    (out / "parquet").mkdir(parents=True, exist_ok=True)
-    df.to_parquet(out / "parquet" / "cartera_limpia.parquet", index=False)
-    pd.DataFrame([summary]).to_csv(out / "csv" / "resumen_cartera.csv", index=False)
-    reference_impl.segment_summary(df).to_csv(
-        out / "csv" / "resumen_segmento.csv", index=False
-    )
-    reference_impl.status_summary(df).to_csv(
-        out / "csv" / "resumen_estatus.csv", index=False
-    )
-    reference_impl.pd_bucket_summary(df).to_csv(
-        out / "csv" / "resumen_buckets_pd.csv", index=False
-    )
     _print_summary(summary)
-    print(f"Salidas en: {out}")
+    print(f"Salidas en: {output_dir}")
     return EXIT_OK
 
 

@@ -1,4 +1,6 @@
-"""ETL de riesgo de crédito con PySpark, corriendo en modo local.
+"""
+Capa: Reglas de negocio — validación, enriquecimiento y agregados de la cartera. Por dentro, el flujo de datos lleva sus propias capas Bronce → Plata → Oro.
+ETL de riesgo de crédito con PySpark, corriendo en modo local.
 
 La idea de fondo es la misma que en física estadística: una cartera no
 se entiende crédito por crédito, sino por los promedios del conjunto.
@@ -16,6 +18,21 @@ desarrolló esto, el puente Python-JVM de PySpark (el que usan
 ``createDataFrame`` y ``toPandas``) se cae por el sandbox, así que el ETL
 está diseñado para no necesitarlo. En una máquina normal ese puente
 funciona, pero aquí no hace falta.
+
+El pipeline está organizado en tres capas, como un yacimiento
+estratificado — cada capa es un estado de los datos y solo se puede
+llegar a la siguiente pasando por la anterior:
+
+- **Bronce** (``to_bronze``): los datos tal como llegan, sin tocar.
+  Se guardan en ``outputs/bronze`` para que siempre se pueda volver
+  al origen y reproducir todo desde ahí.
+- **Plata** (``to_silver``): los datos limpios y validados. Aquí vive
+  la compuerta de calidad: si la cartera no pasa la validación, el
+  pipeline se detiene y nada de lo que sigue se escribe. También se
+  enriquece: pérdida esperada y buckets de PD.
+- **Oro** (``to_gold``): los agregados listos para el negocio — el
+  resumen de la cartera y sus aperturas por segmento, estatus y
+  bucket de PD. Es lo que leen el tablero, el Excel y Access.
 """
 
 from __future__ import annotations
@@ -40,6 +57,9 @@ __all__ = [
     "status_summary_df",
     "pd_bucket_summary_df",
     "row_to_dict",
+    "to_bronze",
+    "to_silver",
+    "to_gold",
     "write_outputs",
     "run_etl",
 ]
@@ -255,8 +275,8 @@ def row_to_dict(row):
     return {k: row[k] for k in row.__fields__}
 
 
-def write_outputs(df_clean, summaries, out_dir):
-    """Escribe las salidas: Parquet para máquinas, CSV para humanos.
+def _write_dataset(df, layer_dir, name):
+    """Escribe un dataset en una capa: Parquet para máquinas, CSV para humanos.
 
     El Parquet es columnar y tipado: es lo que leería el siguiente paso
     del pipeline (un tablero, otro job de Spark, un modelo). El CSV es
@@ -264,51 +284,111 @@ def write_outputs(df_clean, summaries, out_dir):
     abrir directo en Excel sin andar buscando qué part-00000 es.
     Devuelve las rutas que se escribieron.
     """
-    out_dir = Path(out_dir)
+    layer_dir = Path(layer_dir)
+    pq = layer_dir / "parquet" / name
+    csv = layer_dir / "csv" / name
+    df.write.mode("overwrite").parquet(str(pq))
+    df.coalesce(1).write.mode("overwrite").option("header", True).csv(str(csv))
+    return {"parquet": str(pq), "csv": str(csv)}
+
+
+def to_bronze(spark, input_path, out_dir):
+    """Capa Bronce: los datos tal como llegan, sin tocar.
+
+    Se lee el CSV con el esquema fijo y se guarda una copia exacta en
+    ``outputs/bronze`` (Parquet + CSV). No se valida nada aquí y no se
+    enriquece nada: el Bronce es el fósil, y su trabajo es preservar
+    lo que llegó — incluida una fila rota, si la hay — para que el
+    problema se pueda diagnosticar después en vez de perderse en el
+    camino. Devuelve (DataFrame crudo, rutas escritas).
+    """
+    df = read_portfolio(spark, input_path)
+    written = _write_dataset(df, Path(out_dir) / "bronze", "cartera_cruda")
+    return df, written
+
+
+def to_silver(df, out_dir):
+    """Capa Plata: los datos limpios y validados.
+
+    Aquí vive la compuerta de calidad del pipeline: si la cartera no
+    pasa la validación, se levanta ValueError y NO se escribe nada en
+    Plata ni en Oro — mejor no tener salida que tener una salida que
+    miente. Si pasa, se enriquece con la pérdida esperada y el bucket
+    de PD y se guarda en ``outputs/silver``. Devuelve (DataFrame
+    limpio y enriquecido, rutas escritas).
+    """
+    issues = validate_portfolio(df)
+    if issues:
+        raise ValueError("cartera inválida: " + "; ".join(issues))
+    df = add_expected_loss(df)
+    df = add_pd_bucket(df)
+    written = _write_dataset(df, Path(out_dir) / "silver", "cartera_limpia")
+    return df, written
+
+
+def to_gold(df, out_dir):
+    """Capa Oro: los agregados listos para el negocio.
+
+    El resumen de toda la cartera y sus aperturas por segmento, por
+    estatus y por bucket de PD — las cifras que un analista miraría
+    cada mañana y las que leen el tablero, el Excel y Access. Se
+    guardan en ``outputs/gold``. Devuelve (resúmenes, rutas escritas).
+    """
+    summaries = {
+        "resumen_cartera": portfolio_summary_df(df),
+        "resumen_segmento": segment_summary_df(df),
+        "resumen_estatus": status_summary_df(df),
+        "resumen_buckets_pd": pd_bucket_summary_df(df),
+    }
     written = {}
-
-    def _write(df, name):
-        pq = out_dir / "parquet" / name
-        csv = out_dir / "csv" / name
-        df.write.mode("overwrite").parquet(str(pq))
-        df.coalesce(1).write.mode("overwrite").option("header", True).csv(str(csv))
-        written[name] = {"parquet": str(pq), "csv": str(csv)}
-
-    df_clean.write.mode("overwrite").parquet(str(out_dir / "parquet" / "cartera_limpia"))
-    written["cartera_limpia"] = {"parquet": str(out_dir / "parquet" / "cartera_limpia")}
     for name, summary_df in summaries.items():
-        _write(summary_df, name)
-    return written
+        written[name] = _write_dataset(summary_df, Path(out_dir) / "gold", name)
+    return summaries, written
+
+
+def write_outputs(df_clean, summaries, out_dir):
+    """Escribe la cartera limpia en Plata y los resúmenes en Oro.
+
+    Es la entrada vieja para escribir salidas (la usan quienes ya
+    tenían el DataFrame limpio y los resúmenes calculados); por dentro
+    solo delega en las capas. Para un pipeline completo se usa
+    ``run_etl``, que pasa por Bronce, Plata y Oro en orden.
+    """
+    out_dir = Path(out_dir)
+    silver = _write_dataset(df_clean, out_dir / "silver", "cartera_limpia")
+    gold = {}
+    for name, summary_df in summaries.items():
+        gold[name] = _write_dataset(summary_df, out_dir / "gold", name)
+    return {"silver": {"cartera_limpia": silver}, "gold": gold}
 
 
 def run_etl(input_path, output_dir, master="local[*]", spark=None):
-    """Corre el ETL completo y devuelve el resumen y las rutas.
+    """Corre el ETL completo: Bronce -> Plata -> Oro.
 
-    El orden importa y no es capricho: primero se lee, luego se valida
-    (si los datos están rotos se aborta con ValueError antes de
-    calcular nada), luego se enriquece (pérdida esperada, buckets),
-    luego se agrega y al final se escribe. Si algo falla a la mitad,
-    no queda ninguna salida a medias haciéndose pasar por buena.
+    El orden importa y no es capricho: primero se lee y se preserva
+    lo crudo (Bronce), luego se valida y se enriquece (Plata — si los
+    datos están rotos se aborta con ValueError antes de calcular nada)
+    y al final se agrega (Oro). Si algo falla a la mitad, no queda
+    ninguna salida a medias haciéndose pasar por buena: la capa que
+    falló simplemente no se escribe. Devuelve el resumen y las rutas
+    escritas, agrupadas por capa.
     """
     own_spark = spark is None
     if own_spark:
         spark = build_spark(master=master)
     try:
-        df = read_portfolio(spark, input_path)
-        issues = validate_portfolio(df)
-        if issues:
-            raise ValueError("cartera inválida: " + "; ".join(issues))
-        df = add_expected_loss(df)
-        df = add_pd_bucket(df)
-        summaries = {
-            "resumen_cartera": portfolio_summary_df(df),
-            "resumen_segmento": segment_summary_df(df),
-            "resumen_estatus": status_summary_df(df),
-            "resumen_buckets_pd": pd_bucket_summary_df(df),
-        }
-        written = write_outputs(df, summaries, output_dir)
+        df_raw, bronze = to_bronze(spark, input_path, output_dir)
+        df, silver = to_silver(df_raw, output_dir)
+        summaries, gold = to_gold(df, output_dir)
         summary = row_to_dict(summaries["resumen_cartera"].collect()[0])
-        return {"summary": summary, "outputs": written}
+        return {
+            "summary": summary,
+            "outputs": {
+                "bronze": bronze,
+                "silver": silver,
+                "gold": gold,
+            },
+        }
     finally:
         if own_spark:
             spark.stop()
