@@ -133,6 +133,32 @@ Códigos de salida: 0 = bien, 2 = argumentos mal, 3 = la cartera no
 pasó la validación, 1 = cualquier otro error. El `run_etl.sh` guarda
 un log por corrida en `logs/` y devuelve el mismo código que el ETL.
 
+## Espejo opcional en Azure Data Lake Storage Gen2
+
+El ETL escribe las salidas en disco; con `--upload-adls` además las
+sube a un lago de Azure, con los mismos nombres de blob que usa el
+proyecto hermano `azure-data-lake-credit-risk` (`bronze/`,
+`silver/`, `gold/`). Es un espejo, no una segunda implementación:
+Spark sigue siendo el protagonista y el lago local sigue siendo el
+comportamiento por defecto. Solo se suben los CSV de zona (los
+Parquet, el Excel y el Access no van al lago).
+
+```bash
+export AZURE_STORAGE_CONNECTION_STRING='DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net'
+# ... o, en vez de la cadena: AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_KEY
+python -m spark_credit_risk_etl.cli --reference --upload-adls
+python -m spark_credit_risk_etl.cli --upload-adls   # igual, con Spark
+```
+
+Si la subida falla, el ETL ya terminó y las salidas locales ya
+existen: el programa lo dice y sale con código 1. La cadena de
+conexión y la clave son secretos: van en variables de entorno, nunca
+en el código ni en Git. El módulo está en
+`spark_credit_risk_etl/adls.py` (capa Cliente) y se prueba contra un
+falso en memoria en `tests/test_adls.py`; `azure-storage-blob` solo
+se necesita para este flag y está marcado como opcional en
+`requirements.txt`.
+
 ## Excel con tablas dinámicas y Access
 
 El ETL deja Parquet y CSV, que son para máquinas y para mirar. Para

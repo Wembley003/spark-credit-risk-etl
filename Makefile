@@ -5,6 +5,9 @@
 #   make test-reference  corre solo las pruebas de pandas (sin Java)
 #   make run             corre el ETL con Spark (vía run_etl.sh)
 #   make run-reference   corre el ETL con pandas (sin Java)
+#   make upload-adls     corre el ETL con pandas y sube los CSV a ADLS Gen2
+#                        (necesita AZURE_STORAGE_CONNECTION_STRING
+#                        o AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_KEY)
 #   make excel           exporta las salidas a outputs/portfolio.xlsx
 #                        (Excel con tablas dinámicas nativas)
 #   make access          construye access/spark-credit-risk-etl.accdb
@@ -18,7 +21,7 @@ PYTHON := $(VENV)/bin/python
 # TMPDIR apunta a un directorio del disco grande.
 export TMPDIR ?= $(CURDIR)/.pip-tmp
 
-.PHONY: help venv install test test-reference run run-reference excel access clean
+.PHONY: help venv install test test-reference run run-reference upload-adls excel access clean
 
 help:
 	@grep -E '^[a-z-]+:' $(MAKEFILE_LIST) | sed 's/:.*# / — /;s/^/  make /'
@@ -42,6 +45,9 @@ run:
 
 run-reference:
 	./run_etl.sh --reference
+
+upload-adls:
+	$(PYTHON) -m spark_credit_risk_etl.cli --reference --upload-adls
 
 excel:
 	$(PYTHON) -m spark_credit_risk_etl.excel_export

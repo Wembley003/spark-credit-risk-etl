@@ -191,7 +191,7 @@ _PROJECT = Path(__file__).resolve().parent.parent
 _PACKAGE = _PROJECT / "spark_credit_risk_etl"
 
 _CAPAS = {
-    "cliente": {"cli", "run_etl"},
+    "cliente": {"cli", "run_etl", "adls"},
     "reglas": {"etl", "reference_impl"},
     "consultas": {"excel_export", "pivot_table"},
 }
